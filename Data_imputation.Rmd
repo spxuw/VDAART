@@ -1,0 +1,427 @@
+---
+title: "Export the cross-validation data and external validation data for the asthma status prediction of VDAART cohort impputed using TOBMI, median model and missForest"
+author: "Xu-Wen Wang"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document: default
+---
+```{r}
+##TOBMI function used for imputation
+TOBMI <- function(x = cpg, y = exp) {
+  ##Calculating the distances among un-/complete cases using auxiliary dataset
+  dist.matrix <- as.matrix(dist( x ))
+  
+  ##Neighbors list for every uncomplete cases
+  missing_rows <- which(complete.cases(y) == F)
+  missing_num <- length(missing_rows)
+  available_rows = setdiff(1:nrow(dist.matrix),missing_rows)
+  donors <- list()
+  for(i in 1:missing_num){
+    donors[[i]] <- as.matrix(sort(dist.matrix[missing_rows[i],available_rows])[1 : floor(sqrt(dim(x)[1] - missing_num))])
+  }
+  
+  ##Neighbors will be weighted by distance 
+  donors.w<-list()		
+  for(i in 1:missing_num){
+    donors.w[[i]]<-(1/donors[[i]][,1])/sum((1/donors[[i]][,1]))
+  }
+  
+  ##Imputation process
+  for(j in 1:missing_num){
+    as.data.frame(donors.w[[j]])->donors.pool
+    row.names(donors.pool)->donors.pool$id
+    y$id <- row.names(y)
+    merge(donors.pool,y,by='id')->donors.candidates
+    donors.candidates[,2] * donors.candidates[,3:dim(donors.candidates)[2]]->donors.calculate
+    y[missing_rows[j],-dim(y)[2]]<-apply(donors.calculate, MARGIN = 2,sum)
+  }
+  imputed.data<-y[,-dim(y)[2]]
+}
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load the required packages.
+
+```{r packages}
+library(phyloseq)
+require(hexbin)
+library(dplyr) 
+library(tidyverse)
+library(ggplot2)
+library(reshape2)
+library(imputeMissings)
+library(missForest)
+```
+```{r}
+setwd('/udd/spxuw/Asthma_outcome_prediction/code')
+
+# load the mapping files
+mapping_1 = read.table('../metadata/VDAART_multiomics_id_map.csv', header = TRUE, sep = ',')
+mapping_2 = read.table('../metadata/VDAART_multiomics_mirna-mrna_map.csv', header = TRUE, sep = ',')
+mapping_3 =  read.table('../microbiome/metadata.csv', header = TRUE, sep = ',')
+disease_state = read.table('../metadata/asthma_status_v2.csv', header = TRUE, sep = ',')
+disease_state = disease_state[complete.cases(disease_state), ]
+
+# load the omics data
+## load gwas data processed using Julian's method
+load("../prs_sordillo/data/snp_data.RData")
+gwas = snp_data
+gwas$vid = mapping_1$vid[match(gwas$S_SUBJECTID, mapping_1$S_SUBJECTID)]
+gwas = gwas[!is.na(gwas$vid),]
+rownames(gwas) = gwas$vid
+gwas = gwas[,3:8]
+print(paste("sample size of gwas is: ",nrow(gwas)))
+
+## load mirna data
+mirna = read.table('../mirna/merged_counts_mirna_cb.txt',header = TRUE,row.names = 1, check.names = FALSE)
+colnames(mirna) = mapping_2$vid[match(colnames(mirna), mapping_2$ID)]
+print(paste("sample size of mirna is: ",ncol(mirna)))
+
+## load mrna data
+mrna = read.table('../mrna/merged_counts.txt',header = TRUE,row.names = 1,  check.names = FALSE)
+colnames(mrna) = mapping_2$vid[match(colnames(mrna), mapping_2$ID)]
+print(paste("sample size of mrna is: ",ncol(mrna)))
+
+## microbiome data
+microbiome = readRDS("../microbiome/Phyloseq")
+microbiome_table = microbiome@otu_table@.Data
+before_1 = mapping_3$SampleID[mapping_3$COLLECTION=='Fecal Flora Collection month 3']
+before_2 = mapping_3$SampleID[mapping_3$COLLECTION=='Year 1 FF Collection']
+microbiome_table = microbiome_table[,colnames(microbiome_table)%in%c(before_1,before_2)]
+colnames(microbiome_table) = mapping_3$vid[match(colnames(microbiome_table), mapping_3$SampleID)]
+print(paste("sample size of microbiome is: ",ncol(microbiome_table)))
+
+## metabolomics data
+metabolomics = read.table('../metabolomics/Mets_Final_Plasma_Y1_Apr2019.csv', sep = ',', check.names = FALSE)
+rownames(metabolomics) = metabolomics[,4]
+colnames(metabolomics) = metabolomics[1,]
+metabolomics = metabolomics[2:nrow(metabolomics),27:ncol(metabolomics)]
+rownames(metabolomics) = mapping_1$vid[match(rownames(metabolomics), mapping_1$S_SUBJECTID)]
+rowname_temp = rownames(metabolomics)
+metabolomics <- as.data.frame(lapply(metabolomics, as.numeric))
+rownames(metabolomics) = rowname_temp
+print(paste("sample size of metabolomics is: ",nrow(metabolomics)))
+
+## methylation
+load('../methylation/disease_outcome_prediction_challenge/betas.rcp.vdaart.pc2.1622163789.RData')
+meta_methylation = read.table('../methylation/disease_outcome_prediction_challenge/SampleSheet.csv',header = TRUE, sep = ',')
+meta_methylation$Basename = sub("/proj/regeps/regep00/studies/VDAART/data/methylation/VDAART_850K/data/raw/LEVEL1/", "", meta_methylation$Basename)
+colnames(betas.rcp.vdaart.pc2) = meta_methylation$S_SUBJECTID[match(colnames(betas.rcp.vdaart.pc2), meta_methylation$Basename)]
+colnames(betas.rcp.vdaart.pc2) = mapping_1$vid[match(colnames(betas.rcp.vdaart.pc2), mapping_1$S_SUBJECTID)]
+print(paste("sample size of methylation is: ",ncol(betas.rcp.vdaart.pc2)))
+```
+# overlap samples between gwas, microbiome and methylation data
+```{r}
+gwas_microbiome_methylation = intersect(intersect(rownames(gwas),colnames(microbiome_table)),colnames(betas.rcp.vdaart.pc2))
+print(paste("sample size with all omics available: ",length(gwas_microbiome_methylation)))
+```
+
+# overlap between outcome and gwas, microbiome and methylation data
+```{r}
+Final = intersect(gwas_microbiome_methylation,disease_state$vid)
+rownames(disease_state) = disease_state$vid
+disease_state = disease_state[disease_state$vid%in%Final,]
+rownames(disease_state) = as.character(rownames(disease_state))
+
+# statistics
+print(paste("Control size is: ",length(which(disease_state$asthmawhz=='FALSE'))))
+print(paste("Case size is: ",length(which(disease_state$asthmawhz=='TRUE'))))
+```
+
+## exclude non-overlap samples
+```{r}
+gwas = gwas[rownames(disease_state),]
+mirna = t(mirna)
+mirna = mirna[intersect(rownames(disease_state),rownames(mirna)),]
+mrna = t(mrna)
+mrna = mrna[intersect(rownames(disease_state),rownames(mrna)),]
+microbiome_table = t(microbiome_table)
+microbiome_table = microbiome_table[rownames(disease_state),]
+metabolomics = metabolomics[intersect(rownames(disease_state),rownames(metabolomics)),]
+betas.rcp.vdaart.pc2 = t(betas.rcp.vdaart.pc2)
+betas.rcp.vdaart.pc2 = betas.rcp.vdaart.pc2[rownames(disease_state),]
+
+print(paste("filtered gwas samples is: ",length(rownames(gwas))))
+print(paste("filtered mirna samples is: ",length(rownames(mirna))))
+print(paste("filtered mrna samples is: ",length(rownames(mrna))))
+print(paste("filtered microbiome samples is: ",length(rownames(microbiome_table))))
+print(paste("filtered metabolomics samples is: ",length(rownames(metabolomics))))
+print(paste("filtered methylation samples is: ",length(rownames(betas.rcp.vdaart.pc2))))
+```
+# filter the features using Wilcox test for external validation
+```{r}
+suppressWarnings(library(edgeR, quietly = T))
+N_sample = nrow(disease_state)
+test_index <- which(disease_state$asthmawhz=='Hidden')
+train_index <- setdiff(seq(1,N_sample), test_index)
+train_vid = disease_state$vid[train_index]
+test_vid = disease_state$vid[test_index]
+
+# mirna
+train_vid_mirna = intersect(rownames(mirna),as.character(train_vid))
+pre_mirna = colSums(mirna)
+mirna = mirna[,pre_mirna>nrow(mirna)]
+y_mirna <- DGEList(counts=as.data.frame(t(mirna[train_vid_mirna,])),group=disease_state[train_vid_mirna,'asthmawhz'])
+keep_mirna <- filterByExpr(y_mirna)
+y_mirna <- calcNormFactors(y_mirna,method="TMM")
+count_norm_mirna=cpm(y_mirna)
+count_norm_mirna<-as.data.frame(count_norm_mirna)
+pvalues_mirna <- sapply(1:nrow(count_norm_mirna),function(i){
+     data<-cbind.data.frame(gene=as.numeric(t(count_norm_mirna[i,])),disease_state[train_vid_mirna,'asthmawhz'])
+     p=wilcox.test(gene~disease_state[train_vid_mirna,'asthmawhz'], data)$p.value
+     return(p)
+   })
+fdr_mirna=p.adjust(pvalues_mirna,method = "fdr")
+outRst_mirna<-data.frame(pValues=pvalues_mirna, FDR=fdr_mirna)
+outRst_mirna[is.na(outRst_mirna)] = 1
+rownames(outRst_mirna)=rownames(count_norm_mirna)
+outRst_mirna = outRst_mirna[order(outRst_mirna$pValues),]
+mirna_external =mirna[,rownames(outRst_mirna)[1:300]]
+
+# mrna
+train_vid_mrna = intersect(rownames(mrna),as.character(train_vid))
+pre_mrna = colSums(mrna)
+mrna = mrna[,pre_mrna>nrow(mrna)]
+y_mrna <- DGEList(counts=as.data.frame(t(mrna[as.character(train_vid_mrna),])),group=disease_state[train_vid_mrna,'asthmawhz'])
+keep_mrna <- filterByExpr(y_mrna)
+y_mrna <- calcNormFactors(y_mrna,method="TMM")
+count_norm_mrna=cpm(y_mrna)
+count_norm_mrna<-as.data.frame(count_norm_mrna)
+pvalues_mrna <- sapply(1:nrow(count_norm_mrna),function(i){
+     data<-cbind.data.frame(gene=as.numeric(t(count_norm_mrna[i,])),disease_state[train_vid_mrna,'asthmawhz'])
+     p=wilcox.test(gene~disease_state[train_vid_mrna,'asthmawhz'], data)$p.value
+     return(p)
+   })
+fdr_mrna=p.adjust(pvalues_mrna,method = "fdr")
+outRst_mrna<-data.frame(pValues=pvalues_mrna, FDR=fdr_mrna)
+outRst_mrna[is.na(outRst_mrna)] = 1
+rownames(outRst_mrna)=rownames(count_norm_mrna)
+outRst_mrna = outRst_mrna[order(outRst_mrna$pValues),]
+mrna_external =mrna[,rownames(outRst_mrna)[1:300]]
+
+# microbiome
+microbiome_table_binary = microbiome_table
+microbiome_table_binary[microbiome_table_binary>0] = 1
+prevalance = colSums(microbiome_table_binary)
+microbiome_table = microbiome_table[,prevalance>30]
+
+# bad samples
+bad_smpls = which(rowSums(microbiome_table)==0)
+microbiome_table[bad_smpls,] = microbiome_table[sample(rownames(microbiome_table),length(bad_smpls)),]
+
+train_vid_microbiome = intersect(rownames(microbiome_table),as.character(train_vid))
+y_microbiome <- DGEList(counts=as.data.frame(t(microbiome_table[as.character(train_vid_microbiome),])),group=disease_state[train_vid_microbiome,'asthmawhz'])
+keep_microbiome <- filterByExpr(y_microbiome)
+y_microbiome <- calcNormFactors(y_microbiome,method="TMM")
+count_norm_microbiome=cpm(y_microbiome)
+count_norm_microbiome<-as.data.frame(count_norm_microbiome)
+pvalues_microbiome <- sapply(1:nrow(count_norm_microbiome),function(i){
+     data<-cbind.data.frame(gene=as.numeric(t(count_norm_microbiome[i,])),disease_state[train_vid_microbiome,'asthmawhz'])
+     p=wilcox.test(gene~disease_state[train_vid_microbiome,'asthmawhz'], data)$p.value
+     return(p)
+   })
+fdr_microbiome=p.adjust(pvalues_microbiome,method = "fdr")
+outRst_microbiome<-data.frame(pValues=pvalues_microbiome, FDR=fdr_microbiome)
+outRst_microbiome[is.na(outRst_microbiome)] = 1
+rownames(outRst_microbiome)=rownames(count_norm_microbiome)
+outRst_microbiome = outRst_microbiome[order(outRst_microbiome$pValues),]
+microbiome_table_external =microbiome_table[,rownames(outRst_microbiome)[1:300]]
+
+# filter methylation and metabolomics
+mds = matrixStats::colSds(betas.rcp.vdaart.pc2)
+order_mds = sort(mds,index.return=TRUE,decreasing = T)
+betas.rcp.vdaart.pc2 = betas.rcp.vdaart.pc2[,order_mds$ix[1:300]]
+
+mds_metabo = matrixStats::colSds(as.matrix(metabolomics))
+order_metabo = sort(mds_metabo,index.return=TRUE,decreasing = T)
+metabolomics = metabolomics[,order_metabo$ix[1:300]]
+```
+
+# reputation of the mirna, mrna and metabolims using TOBMI
+```{r}
+mirna_reputed = matrix(NA, nrow = nrow(gwas), ncol = ncol(mirna_external))
+mrna_reputed = matrix(NA, nrow = nrow(gwas), ncol = ncol(mrna_external))
+metabolomics_reputed = matrix(NA, nrow = nrow(gwas), ncol = ncol(metabolomics))
+rownames(mirna_reputed) = rownames(gwas)
+rownames(mrna_reputed) = rownames(gwas)
+rownames(metabolomics_reputed) = rownames(gwas)
+colnames(mirna_reputed) = colnames(mirna_external)
+colnames(mrna_reputed) = colnames(mrna_external)
+colnames(metabolomics_reputed) = colnames(metabolomics)
+
+mirna_reputed = as.data.frame(mirna_reputed)
+mrna_reputed = as.data.frame(mrna_reputed)
+metabolomics_reputed = as.data.frame(metabolomics_reputed)
+mirna_reputed[rownames(mirna),] = mirna_external
+mrna_reputed[rownames(mrna),] = mrna_external
+metabolomics_reputed[rownames(metabolomics),] = metabolomics
+
+# TOBMI
+mirna_reputed_TOBMI = TOBMI(x = betas.rcp.vdaart.pc2, y = mirna_reputed)
+mrna_reputed_TOBMI = TOBMI(x = betas.rcp.vdaart.pc2, y = mrna_reputed)
+metabolomics_reputed_TOBMI = TOBMI(x = microbiome_table, y = metabolomics_reputed)
+
+# median model
+mirna_reputed_median = imputeMissings::impute(mirna_reputed,method = "median/mode")
+mrna_reputed_median = imputeMissings::impute(mrna_reputed,method = "median/mode")
+metabolomics_reputed_median = imputeMissings::impute(metabolomics_reputed,method = "median/mode")
+
+# missforest
+mirna_reputed_missRF = missForest(mirna_reputed)$ximp
+mrna_reputed_missRF = missForest(mrna_reputed)$ximp
+metabolomics_reputed_missRF = missForest(metabolomics_reputed)$ximp
+```
+
+# export the external omics
+```{r}
+gwas_train = gwas
+gwas_test = gwas
+gwas_train = gwas_train[train_index,]
+gwas_test = gwas_test[test_index,]
+
+gwas_train = gwas_train[as.character(train_vid),]
+gwas_test = gwas_test[as.character(test_vid),]
+
+################################################
+mirna_train_median = mirna_reputed_median[as.character(train_vid),]
+mirna_test_median = mirna_reputed_median[as.character(test_vid),]
+mirna_train_TOBMI = mirna_reputed_TOBMI[as.character(train_vid),]
+mirna_test_TOBMI = mirna_reputed_TOBMI[as.character(test_vid),]
+mirna_train_missRF = mirna_reputed_missRF[as.character(train_vid),]
+mirna_test_missRF = mirna_reputed_missRF[as.character(test_vid),]
+
+mrna_train_median = mrna_reputed_median[as.character(train_vid),]
+mrna_test_median = mrna_reputed_median[as.character(test_vid),]
+mrna_train_TOBMI = mrna_reputed_TOBMI[as.character(train_vid),]
+mrna_test_TOBMI = mrna_reputed_TOBMI[as.character(test_vid),]
+mrna_train_missRF = mrna_reputed_missRF[as.character(train_vid),]
+mrna_test_missRF = mrna_reputed_missRF[as.character(test_vid),]
+
+## process microbiome data: remove rare species and take log transformation
+microbiome_train = microbiome_table_external[as.character(train_vid),]
+microbiome_test = microbiome_table_external[as.character(test_vid),]
+
+## process the metabolomics data
+metabolomics_train_median = metabolomics_reputed_median[as.character(train_vid),]
+metabolomics_test_median = metabolomics_reputed_median[as.character(test_vid),]
+metabolomics_train_TOBMI = metabolomics_reputed_TOBMI[as.character(train_vid),]
+metabolomics_test_TOBMI = metabolomics_reputed_TOBMI[as.character(test_vid),]
+metabolomics_train_missRF = metabolomics_reputed_missRF[as.character(train_vid),]
+metabolomics_test_missRF = metabolomics_reputed_missRF[as.character(test_vid),]
+
+## DNA methylation
+methylation_train = betas.rcp.vdaart.pc2[as.character(train_vid),]
+methylation_test = betas.rcp.vdaart.pc2[as.character(test_vid),]
+
+merged_train_median = cbind(gwas_train,mirna_train_median,mrna_train_median,microbiome_train,metabolomics_train_median,methylation_train)
+merged_test_median = cbind(gwas_test,mirna_test_median,mrna_test_median,microbiome_test,metabolomics_test_median,methylation_test)
+merged_train_TOBMI = cbind(gwas_train,mirna_train_TOBMI,mrna_train_TOBMI,microbiome_train,metabolomics_train_TOBMI,methylation_train)
+merged_test_TOBMI = cbind(gwas_test,mirna_test_TOBMI,mrna_test_TOBMI,microbiome_test,metabolomics_test_TOBMI,methylation_test)
+merged_train_missRF = cbind(gwas_train,mirna_train_missRF,mrna_train_missRF,microbiome_train,metabolomics_train_missRF,methylation_train)
+merged_test_missRF = cbind(gwas_test,mirna_test_missRF,mrna_test_missRF,microbiome_test,metabolomics_test_missRF,methylation_test)
+
+write.table(merged_train_median, file = paste("../filtered/external_all/Median_Imputed_Train_external.csv",sep = ""), row.names = TRUE, sep=",")
+write.table(merged_test_median, file = paste("../filtered/external_all/Median_Imputed_Test_external.csv",sep = ""), row.names = TRUE, sep=",")
+
+write.table(merged_train_TOBMI, file = paste("../filtered/external_all/TOBMI_Imputed_Train_external.csv",sep = ""), row.names = TRUE, sep=",")
+write.table(merged_test_TOBMI, file = paste("../filtered/external_all/TOBMI_Imputed_Test_external.csv",sep = ""), row.names = TRUE, sep=",")
+
+write.table(merged_train_missRF, file = paste("../filtered/external_all/MissRF_Imputed_Train_external.csv",sep = ""), row.names = TRUE, sep=",")
+write.table(merged_test_missRF, file = paste("../filtered/external_all/MissRF_Imputed_Test_external.csv",sep = ""), row.names = TRUE, sep=",")
+
+write.table(disease_state[train_index,], file = paste("../filtered/external_all/Imputed_Train_Label_external.csv",sep = ""), row.names = TRUE, sep=",")
+meta_g = read.table('../metadata/all_avail.csv', header = TRUE, sep = ',')
+rownames(meta_g) = meta_g$vid
+write.table(meta_g[as.character(test_vid),], file = paste("../filtered/external_all/Imputed_Test_Label_external.csv",sep = ""), row.names = TRUE, sep=",")
+
+#feature_num = c(length(colnames(gwas_train)),length(colnames(mirna_train)),length(colnames(mrna_train)),
+#                length(colnames(microbiome_train)),length(colnames(metabolomics_train)),length(colnames(methylation_train)))
+#write.table(feature_num, file = paste("../filtered/external_all/Imputed_feature_num.csv",sep = ""), row.names = TRUE, sep=",")
+```
+
+## prepare the train/test data for internal validation
+```{r}
+hide_index <- which(disease_state$asthmawhz=='Hidden')
+disease_state = disease_state[-hide_index,]
+gwas = gwas[rownames(disease_state),]
+N_sample = nrow(disease_state)
+folds <- 5
+set.seed(123)
+holdout <- split(sample(1:N_sample), 1:folds)
+rea = 0
+for (i in holdout){
+  test_index <- i
+  train_index <- setdiff(seq(1,N_sample), test_index)
+  train_vid = disease_state$vid[train_index]
+  test_vid = disease_state$vid[test_index]
+  
+  ## gwas processing
+  gwas_train = gwas
+  gwas_test = gwas
+  gwas_train = gwas_train[train_index,]
+  gwas_test = gwas_test[test_index,]
+  
+  gwas_train = gwas_train[as.character(train_vid),]
+  gwas_test = gwas_test[as.character(test_vid),]
+  
+  ## feature selection of mirna,mrna,microbiome
+  mirna_train_median = mirna_reputed_median[as.character(train_vid),]
+  mirna_test_median = mirna_reputed_median[as.character(test_vid),]
+  mirna_train_TOBMI = mirna_reputed_TOBMI[as.character(train_vid),]
+  mirna_test_TOBMI = mirna_reputed_TOBMI[as.character(test_vid),]
+  mirna_train_missRF = mirna_reputed_missRF[as.character(train_vid),]
+  mirna_test_missRF = mirna_reputed_missRF[as.character(test_vid),]
+  
+  mrna_train_median = mrna_reputed_median[as.character(train_vid),]
+  mrna_test_median = mrna_reputed_median[as.character(test_vid),]
+  mrna_train_TOBMI = mrna_reputed_TOBMI[as.character(train_vid),]
+  mrna_test_TOBMI = mrna_reputed_TOBMI[as.character(test_vid),]
+  mrna_train_missRF = mrna_reputed_missRF[as.character(train_vid),]
+  mrna_test_missRF = mrna_reputed_missRF[as.character(test_vid),]
+
+  ## process microbiome data: remove rare species and take log transformation
+  microbiome_train = microbiome_table_external[as.character(train_vid),]
+  microbiome_test = microbiome_table_external[as.character(test_vid),]
+  
+  ## process the metabolomics data
+  metabolomics_train_median = metabolomics_reputed_median[as.character(train_vid),]
+  metabolomics_test_median = metabolomics_reputed_median[as.character(test_vid),]
+  metabolomics_train_TOBMI = metabolomics_reputed_TOBMI[as.character(train_vid),]
+  metabolomics_test_TOBMI = metabolomics_reputed_TOBMI[as.character(test_vid),]
+  metabolomics_train_missRF = metabolomics_reputed_missRF[as.character(train_vid),]
+  metabolomics_test_missRF = metabolomics_reputed_missRF[as.character(test_vid),]
+  
+  ## DNA methylation
+  methylation_train = betas.rcp.vdaart.pc2[as.character(train_vid),]
+  methylation_test = betas.rcp.vdaart.pc2[as.character(test_vid),]
+  
+  merged_train_median = cbind(gwas_train,mirna_train_median,mrna_train_median,microbiome_train,metabolomics_train_median,methylation_train)
+  merged_test_median = cbind(gwas_test,mirna_test_median,mrna_test_median,microbiome_test,metabolomics_test_median,methylation_test)
+  merged_train_TOBMI = cbind(gwas_train,mirna_train_TOBMI,mrna_train_TOBMI,microbiome_train,metabolomics_train_TOBMI,methylation_train)
+  merged_test_TOBMI = cbind(gwas_test,mirna_test_TOBMI,mrna_test_TOBMI,microbiome_test,metabolomics_test_TOBMI,methylation_test)
+  merged_train_missRF = cbind(gwas_train,mirna_train_missRF,mrna_train_missRF,microbiome_train,metabolomics_train_missRF,methylation_train)
+  merged_test_missRF = cbind(gwas_test,mirna_test_missRF,mrna_test_missRF,microbiome_test,metabolomics_test_missRF,methylation_test)
+  
+  write.table(merged_train_median, file = paste("../filtered/internal_all/Median_Imputed_Train_Fold_",rea,".csv",sep = ""), row.names = TRUE, sep=",")
+  write.table(merged_test_median, file = paste("../filtered/internal_all/Median_Imputed_Test_Fold_",rea,".csv",sep = ""), row.names = TRUE, sep=",")
+  
+  write.table(merged_train_TOBMI, file = paste("../filtered/internal_all/TOBMI_Imputed_Train_Fold_",rea,".csv",sep = ""), row.names = TRUE, sep=",")
+  write.table(merged_test_TOBMI, file = paste("../filtered/internal_all/TOBMI_Imputed_Test_Fold_",rea,".csv",sep = ""), row.names = TRUE, sep=",")
+  
+  write.table(merged_train_missRF, file = paste("../filtered/internal_all/MissRF_Imputed_Train_Fold_",rea,".csv",sep = ""), row.names = TRUE, sep=",")
+  write.table(merged_test_missRF, file = paste("../filtered/internal_all/MissRF_Imputed_Test_Fold_",rea,".csv",sep = ""), row.names = TRUE, sep=",")
+  
+  write.table(disease_state[train_index,], file = paste("../filtered/internal_all/Imputed_Train_Label_Fold_",rea,".csv",sep = ""), row.names = TRUE, sep=",")
+  write.table(disease_state[test_index,], file = paste("../filtered/internal_all/Imputed_Test_Label_Fold_",rea,".csv",sep = ""), row.names = TRUE, sep=",")
+  
+  #feature_num = c(length(colnames(gwas_train)),length(colnames(mirna_train)),length(colnames(mrna_train)),
+  #              length(colnames(microbiome_train)),length(colnames(metabolomics_train)),length(colnames(methylation_train)))
+  #write.table(feature_num, file = paste("../filtered/internal_all/Imputed_feature_num_Fold_",rea,".csv",sep = ""), row.names = F, sep=",")
+
+  rea = rea + 1
+}
+```

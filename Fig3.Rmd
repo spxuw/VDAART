@@ -1,0 +1,571 @@
+---
+title: "Multivariate analysis of samples imputed by different methods"
+author: "Xu-Wen Wang"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document: default
+---
+# Load the required packages
+```{r packages}
+library(ggpubr) 
+library(vegan)
+library(ggplot2)
+library(caret)
+library(ggfortify)
+library(gridExtra)
+library(ade4)
+library(Rtsne)
+
+
+```
+```{r}
+setwd('/udd/spxuw/Asthma_outcome_prediction/code')
+Median_train = read.table(file = paste("../filtered/external_all/Median_Imputed_Train_external.csv",sep = ""), header = T, row.names = 1, sep=",")
+TOBMI_train = read.table(file = paste("../filtered/external_all/TOBMI_Imputed_Train_external.csv",sep = ""), header = T, row.names = 1, sep=",")
+MissRF_train = read.table(file = paste("../filtered/external_all/MissRF_Imputed_Train_external.csv",sep = ""), header = T, row.names = 1, sep=",")
+Label_train = read.table(file = paste("../filtered/external_all/Imputed_Train_Label_external.csv",sep = ""), header = T, row.names = 1, sep=",")
+Median_test = read.table(file = paste("../filtered/external_all/Median_Imputed_Test_external.csv",sep = ""), header = T, row.names = 1, sep=",")
+TOBMI_test = read.table(file = paste("../filtered/external_all/TOBMI_Imputed_Test_external.csv",sep = ""), header = T, row.names = 1, sep=",")
+MissRF_test = read.table(file = paste("../filtered/external_all/MissRF_Imputed_Test_external.csv",sep = ""), header = T, row.names = 1, sep=",")
+Label_test = read.table(file = paste("../filtered/external_all/Imputed_Test_Label_external.csv",sep = ""), header = T, row.names = 1, sep=",")
+
+Median_train = rbind(Median_train,Median_test)
+TOBMI_train = rbind(TOBMI_train,TOBMI_test)
+MissRF_train = rbind(MissRF_train,MissRF_test)
+Label_train = rbind(Label_train,Label_test)
+
+```
+# transform the data
+```{r}
+process <- preProcess(as.data.frame(Median_train), method = "scale")
+Median_train <- predict(process, as.data.frame(Median_train))
+
+process <- preProcess(as.data.frame(TOBMI_train), method = "scale")
+TOBMI_train <- predict(process, as.data.frame(TOBMI_train))
+
+process <- preProcess(as.data.frame(MissRF_train), method = "scale")
+MissRF_train <- predict(process, as.data.frame(MissRF_train))
+```
+# PERMANOVA of Median imputation
+```{r}
+# GWAS
+eu_dis = vegdist(Median_train[,1:6],method="euclidean")
+adonis2(eu_dis ~ asthmawhz, data = Label_train, permutations = 999)
+
+tsne_out <- Rtsne(Median_train[,1:6],pca=FALSE,perplexity=2,theta=0.0,check_duplicates = FALSE)
+tsne_out <- as.data.frame(tsne_out$Y)
+pc_plot_data<-data.frame(PC1=tsne_out$V1, PC2=tsne_out$V2, status=Label_train$asthmawhz)
+                         
+g1 = ggplot(data=pc_plot_data,aes(PC1,PC2,color=status))+geom_point(size=1,alpha=0.7)+stat_ellipse()+
+  scale_color_manual(values=c("#FFC20A","#0C7BDC"))+xlab('tSNE_1')+ylab('tSNE_2')+
+  theme_bw() +
+  theme(
+    line = element_line(size = 0.5), # Thickness of all lines, mm
+    rect = element_rect(size = 0.5), # Thickness of all rectangles, mm
+    text = element_text(size = 8), # Size of all text, points
+    axis.text.x = element_text(size = 8,color = 'black'), # Angle x-axis text
+    axis.text.y = element_text(size = 8,color = 'black'), # Angle x-axis text
+    axis.title.x = element_text(size = 10), # Size x-axis title
+    axis.title.y = element_text(size = 10), # Size y-axis title
+    panel.grid.minor = element_blank(), # No minor grid lines
+    panel.grid.major.x = element_blank(), # No major x-axis grid lines
+    panel.grid.major.y = element_blank(),
+    legend.title = element_blank(),
+    legend.position = 'none',
+    legend.box.background = element_rect(size = 0.2), # Box for legend
+    legend.key.size = unit(4, unit = 'mm'),
+    legend.text = element_text(size = 8),
+  )
+# miRNA
+eu_dis = vegdist(Median_train[,7:306],method="euclidean")
+adonis2(eu_dis ~ asthmawhz, data = Label_train, permutations = 999)
+
+tsne_out <- Rtsne(Median_train[,7:306],pca=FALSE,perplexity=2,theta=0.0,check_duplicates = FALSE)
+tsne_out <- as.data.frame(tsne_out$Y)
+pc_plot_data<-data.frame(PC1=tsne_out$V1, PC2=tsne_out$V2, status=Label_train$asthmawhz)
+                         
+g2 = ggplot(data=pc_plot_data,aes(PC1,PC2,color=status))+geom_point(size=1,alpha=0.7)+stat_ellipse()+
+  scale_color_manual(values=c("#FFC20A","#0C7BDC"))+xlab('tSNE_1')+ylab('tSNE_2')+
+  theme_bw() +
+  theme(
+    line = element_line(size = 0.5), # Thickness of all lines, mm
+    rect = element_rect(size = 0.5), # Thickness of all rectangles, mm
+    text = element_text(size = 8), # Size of all text, points
+    axis.text.x = element_text(size = 8,color = 'black'), # Angle x-axis text
+    axis.text.y = element_text(size = 8,color = 'black'), # Angle x-axis text
+    axis.title.x = element_text(size = 10), # Size x-axis title
+    axis.title.y = element_text(size = 10), # Size y-axis title
+    panel.grid.minor = element_blank(), # No minor grid lines
+    panel.grid.major.x = element_blank(), # No major x-axis grid lines
+    panel.grid.major.y = element_blank(),
+    legend.title = element_blank(),
+    legend.position = 'none',
+    legend.box.background = element_rect(size = 0.2), # Box for legend
+    legend.key.size = unit(4, unit = 'mm'),
+    legend.text = element_text(size = 8),
+  )
+# mRNA
+eu_dis = vegdist(Median_train[,307:606],method="euclidean")
+adonis2(eu_dis ~ asthmawhz, data = Label_train, permutations = 999)
+
+tsne_out <- Rtsne(Median_train[,307:606],pca=FALSE,perplexity=2,theta=0.0,check_duplicates = FALSE)
+tsne_out <- as.data.frame(tsne_out$Y)
+pc_plot_data<-data.frame(PC1=tsne_out$V1, PC2=tsne_out$V2, status=Label_train$asthmawhz)
+                         
+g3 = ggplot(data=pc_plot_data,aes(PC1,PC2,color=status))+geom_point(size=1,alpha=0.7)+stat_ellipse()+
+  scale_color_manual(values=c("#FFC20A","#0C7BDC"))+xlab('tSNE_1')+ylab('tSNE_2')+
+  theme_bw() +
+  theme(
+    line = element_line(size = 0.5), # Thickness of all lines, mm
+    rect = element_rect(size = 0.5), # Thickness of all rectangles, mm
+    text = element_text(size = 8), # Size of all text, points
+    axis.text.x = element_text(size = 8,color = 'black'), # Angle x-axis text
+    axis.text.y = element_text(size = 8,color = 'black'), # Angle x-axis text
+    axis.title.x = element_text(size = 10), # Size x-axis title
+    axis.title.y = element_text(size = 10), # Size y-axis title
+    panel.grid.minor = element_blank(), # No minor grid lines
+    panel.grid.major.x = element_blank(), # No major x-axis grid lines
+    panel.grid.major.y = element_blank(),
+    legend.title = element_blank(),
+    legend.position = 'none',
+    legend.box.background = element_rect(size = 0.2), # Box for legend
+    legend.key.size = unit(4, unit = 'mm'),
+    legend.text = element_text(size = 8),
+  )
+# microbiome
+eu_dis = vegdist(Median_train[,607:906],method="euclidean")
+adonis2(eu_dis ~ asthmawhz, data = Label_train, permutations = 999)
+
+tsne_out <- Rtsne(Median_train[,607:906],pca=FALSE,perplexity=2,theta=0.0,check_duplicates = FALSE)
+tsne_out <- as.data.frame(tsne_out$Y)
+pc_plot_data<-data.frame(PC1=tsne_out$V1, PC2=tsne_out$V2, status=Label_train$asthmawhz)
+                         
+g4 = ggplot(data=pc_plot_data,aes(PC1,PC2,color=status))+geom_point(size=1,alpha=0.7)+stat_ellipse()+
+  scale_color_manual(values=c("#FFC20A","#0C7BDC"))+xlab('tSNE_1')+ylab('tSNE_2')+
+  theme_bw() +
+  theme(
+    line = element_line(size = 0.5), # Thickness of all lines, mm
+    rect = element_rect(size = 0.5), # Thickness of all rectangles, mm
+    text = element_text(size = 8), # Size of all text, points
+    axis.text.x = element_text(size = 8,color = 'black'), # Angle x-axis text
+    axis.text.y = element_text(size = 8,color = 'black'), # Angle x-axis text
+    axis.title.x = element_text(size = 10), # Size x-axis title
+    axis.title.y = element_text(size = 10), # Size y-axis title
+    panel.grid.minor = element_blank(), # No minor grid lines
+    panel.grid.major.x = element_blank(), # No major x-axis grid lines
+    panel.grid.major.y = element_blank(),
+    legend.title = element_blank(),
+    legend.position = 'none',
+    legend.box.background = element_rect(size = 0.2), # Box for legend
+    legend.key.size = unit(4, unit = 'mm'),
+    legend.text = element_text(size = 8),
+  )
+# metabomics
+eu_dis = vegdist(Median_train[,907:1206],method="euclidean")
+adonis2(eu_dis ~ asthmawhz, data = Label_train, permutations = 999)
+
+tsne_out <- Rtsne(Median_train[,907:1206],pca=FALSE,perplexity=2,theta=0.0,check_duplicates = FALSE)
+tsne_out <- as.data.frame(tsne_out$Y)
+pc_plot_data<-data.frame(PC1=tsne_out$V1, PC2=tsne_out$V2, status=Label_train$asthmawhz)
+                         
+g5 = ggplot(data=pc_plot_data,aes(PC1,PC2,color=status))+geom_point(size=1,alpha=0.7)+stat_ellipse()+
+  scale_color_manual(values=c("#FFC20A","#0C7BDC"))+xlab('tSNE_1')+ylab('tSNE_2')+
+  theme_bw() +
+  theme(
+    line = element_line(size = 0.5), # Thickness of all lines, mm
+    rect = element_rect(size = 0.5), # Thickness of all rectangles, mm
+    text = element_text(size = 8), # Size of all text, points
+    axis.text.x = element_text(size = 8,color = 'black'), # Angle x-axis text
+    axis.text.y = element_text(size = 8,color = 'black'), # Angle x-axis text
+    axis.title.x = element_text(size = 10), # Size x-axis title
+    axis.title.y = element_text(size = 10), # Size y-axis title
+    panel.grid.minor = element_blank(), # No minor grid lines
+    panel.grid.major.x = element_blank(), # No major x-axis grid lines
+    panel.grid.major.y = element_blank(),
+    legend.title = element_blank(),
+    legend.position = 'none',
+    legend.box.background = element_rect(size = 0.2), # Box for legend
+    legend.key.size = unit(4, unit = 'mm'),
+    legend.text = element_text(size = 8),
+  )
+# methylation
+eu_dis = vegdist(Median_train[,1207:1506],method="euclidean")
+adonis2(eu_dis ~ asthmawhz, data = Label_train, permutations = 999)
+
+tsne_out <- Rtsne(Median_train[,1207:1506],pca=FALSE,perplexity=2,theta=0.0,check_duplicates = FALSE)
+tsne_out <- as.data.frame(tsne_out$Y)
+pc_plot_data<-data.frame(PC1=tsne_out$V1, PC2=tsne_out$V2, status=Label_train$asthmawhz)
+                         
+g6 = ggplot(data=pc_plot_data,aes(PC1,PC2,color=status))+geom_point(size=1,alpha=0.7)+stat_ellipse()+
+  scale_color_manual(values=c("#FFC20A","#0C7BDC"))+xlab('tSNE_1')+ylab('tSNE_2')+
+  theme_bw() +
+  theme(
+    line = element_line(size = 0.5), # Thickness of all lines, mm
+    rect = element_rect(size = 0.5), # Thickness of all rectangles, mm
+    text = element_text(size = 8), # Size of all text, points
+    axis.text.x = element_text(size = 8,color = 'black'), # Angle x-axis text
+    axis.text.y = element_text(size = 8,color = 'black'), # Angle x-axis text
+    axis.title.x = element_text(size = 10), # Size x-axis title
+    axis.title.y = element_text(size = 10), # Size y-axis title
+    panel.grid.minor = element_blank(), # No minor grid lines
+    panel.grid.major.x = element_blank(), # No major x-axis grid lines
+    panel.grid.major.y = element_blank(),
+    legend.title = element_blank(),
+    legend.position = 'none',
+    legend.box.background = element_rect(size = 0.2), # Box for legend
+    legend.key.size = unit(4, unit = 'mm'),
+    legend.text = element_text(size = 8),
+  )
+```
+```{r}
+# GWAS
+eu_dis = vegdist(TOBMI_train[,1:6],method="euclidean")
+adonis2(eu_dis ~ asthmawhz, data = Label_train, permutations = 999)
+
+tsne_out <- Rtsne(TOBMI_train[,1:6],pca=FALSE,perplexity=2,theta=0.0,check_duplicates = FALSE)
+tsne_out <- as.data.frame(tsne_out$Y)
+pc_plot_data<-data.frame(PC1=tsne_out$V1, PC2=tsne_out$V2, status=Label_train$asthmawhz)
+                         
+g7 = ggplot(data=pc_plot_data,aes(PC1,PC2,color=status))+geom_point(size=1,alpha=0.7)+stat_ellipse()+
+  scale_color_manual(values=c("#FFC20A","#0C7BDC"))+xlab('tSNE_1')+ylab('tSNE_2')+
+  theme_bw() +
+  theme(
+    line = element_line(size = 0.5), # Thickness of all lines, mm
+    rect = element_rect(size = 0.5), # Thickness of all rectangles, mm
+    text = element_text(size = 8), # Size of all text, points
+    axis.text.x = element_text(size = 8,color = 'black'), # Angle x-axis text
+    axis.text.y = element_text(size = 8,color = 'black'), # Angle x-axis text
+    axis.title.x = element_text(size = 10), # Size x-axis title
+    axis.title.y = element_text(size = 10), # Size y-axis title
+    panel.grid.minor = element_blank(), # No minor grid lines
+    panel.grid.major.x = element_blank(), # No major x-axis grid lines
+    panel.grid.major.y = element_blank(),
+    legend.title = element_blank(),
+    legend.position = 'none',
+    legend.box.background = element_rect(size = 0.2), # Box for legend
+    legend.key.size = unit(4, unit = 'mm'),
+    legend.text = element_text(size = 8),
+  )
+# miRNA
+eu_dis = vegdist(TOBMI_train[,7:306],method="euclidean")
+adonis2(eu_dis ~ asthmawhz, data = Label_train, permutations = 999)
+
+tsne_out <- Rtsne(TOBMI_train[,7:306],pca=FALSE,perplexity=2,theta=0.0,check_duplicates = FALSE)
+tsne_out <- as.data.frame(tsne_out$Y)
+pc_plot_data<-data.frame(PC1=tsne_out$V1, PC2=tsne_out$V2, status=Label_train$asthmawhz)
+                         
+g8 = ggplot(data=pc_plot_data,aes(PC1,PC2,color=status))+geom_point(size=1,alpha=0.7)+stat_ellipse()+
+  scale_color_manual(values=c("#FFC20A","#0C7BDC"))+xlab('tSNE_1')+ylab('tSNE_2')+
+  theme_bw() +
+  theme(
+    line = element_line(size = 0.5), # Thickness of all lines, mm
+    rect = element_rect(size = 0.5), # Thickness of all rectangles, mm
+    text = element_text(size = 8), # Size of all text, points
+    axis.text.x = element_text(size = 8,color = 'black'), # Angle x-axis text
+    axis.text.y = element_text(size = 8,color = 'black'), # Angle x-axis text
+    axis.title.x = element_text(size = 10), # Size x-axis title
+    axis.title.y = element_text(size = 10), # Size y-axis title
+    panel.grid.minor = element_blank(), # No minor grid lines
+    panel.grid.major.x = element_blank(), # No major x-axis grid lines
+    panel.grid.major.y = element_blank(),
+    legend.title = element_blank(),
+    legend.position = 'none',
+    legend.box.background = element_rect(size = 0.2), # Box for legend
+    legend.key.size = unit(4, unit = 'mm'),
+    legend.text = element_text(size = 8),
+  )
+# mRNA
+eu_dis = vegdist(TOBMI_train[,307:606],method="euclidean")
+adonis2(eu_dis ~ asthmawhz, data = Label_train, permutations = 999)
+
+tsne_out <- Rtsne(TOBMI_train[,307:606],pca=FALSE,perplexity=2,theta=0.0,check_duplicates = FALSE)
+tsne_out <- as.data.frame(tsne_out$Y)
+pc_plot_data<-data.frame(PC1=tsne_out$V1, PC2=tsne_out$V2, status=Label_train$asthmawhz)
+                         
+g9 = ggplot(data=pc_plot_data,aes(PC1,PC2,color=status))+geom_point(size=1,alpha=0.7)+stat_ellipse()+
+  scale_color_manual(values=c("#FFC20A","#0C7BDC"))+xlab('tSNE_1')+ylab('tSNE_2')+
+  theme_bw() +
+  theme(
+    line = element_line(size = 0.5), # Thickness of all lines, mm
+    rect = element_rect(size = 0.5), # Thickness of all rectangles, mm
+    text = element_text(size = 8), # Size of all text, points
+    axis.text.x = element_text(size = 8,color = 'black'), # Angle x-axis text
+    axis.text.y = element_text(size = 8,color = 'black'), # Angle x-axis text
+    axis.title.x = element_text(size = 10), # Size x-axis title
+    axis.title.y = element_text(size = 10), # Size y-axis title
+    panel.grid.minor = element_blank(), # No minor grid lines
+    panel.grid.major.x = element_blank(), # No major x-axis grid lines
+    panel.grid.major.y = element_blank(),
+    legend.title = element_blank(),
+    legend.position = 'none',
+    legend.box.background = element_rect(size = 0.2), # Box for legend
+    legend.key.size = unit(4, unit = 'mm'),
+    legend.text = element_text(size = 8),
+  )
+# microbiome
+eu_dis = vegdist(TOBMI_train[,607:906],method="euclidean")
+adonis2(eu_dis ~ asthmawhz, data = Label_train, permutations = 999)
+
+tsne_out <- Rtsne(TOBMI_train[,607:906],pca=FALSE,perplexity=2,theta=0.0,check_duplicates = FALSE)
+tsne_out <- as.data.frame(tsne_out$Y)
+pc_plot_data<-data.frame(PC1=tsne_out$V1, PC2=tsne_out$V2, status=Label_train$asthmawhz)
+                         
+g10 = ggplot(data=pc_plot_data,aes(PC1,PC2,color=status))+geom_point(size=1,alpha=0.7)+stat_ellipse()+
+  scale_color_manual(values=c("#FFC20A","#0C7BDC"))+xlab('tSNE_1')+ylab('tSNE_2')+
+  theme_bw() +
+  theme(
+    line = element_line(size = 0.5), # Thickness of all lines, mm
+    rect = element_rect(size = 0.5), # Thickness of all rectangles, mm
+    text = element_text(size = 8), # Size of all text, points
+    axis.text.x = element_text(size = 8,color = 'black'), # Angle x-axis text
+    axis.text.y = element_text(size = 8,color = 'black'), # Angle x-axis text
+    axis.title.x = element_text(size = 10), # Size x-axis title
+    axis.title.y = element_text(size = 10), # Size y-axis title
+    panel.grid.minor = element_blank(), # No minor grid lines
+    panel.grid.major.x = element_blank(), # No major x-axis grid lines
+    panel.grid.major.y = element_blank(),
+    legend.title = element_blank(),
+    legend.position = 'none',
+    legend.box.background = element_rect(size = 0.2), # Box for legend
+    legend.key.size = unit(4, unit = 'mm'),
+    legend.text = element_text(size = 8),
+  )
+# metabomics
+eu_dis = vegdist(TOBMI_train[,907:1206],method="euclidean")
+adonis2(eu_dis ~ asthmawhz, data = Label_train, permutations = 999)
+
+tsne_out <- Rtsne(TOBMI_train[,907:1206],pca=FALSE,perplexity=2,theta=0.0,check_duplicates = FALSE)
+tsne_out <- as.data.frame(tsne_out$Y)
+pc_plot_data<-data.frame(PC1=tsne_out$V1, PC2=tsne_out$V2, status=Label_train$asthmawhz)
+                         
+g11 = ggplot(data=pc_plot_data,aes(PC1,PC2,color=status))+geom_point(size=1,alpha=0.7)+stat_ellipse()+
+  scale_color_manual(values=c("#FFC20A","#0C7BDC"))+xlab('tSNE_1')+ylab('tSNE_2')+
+  theme_bw() +
+  theme(
+    line = element_line(size = 0.5), # Thickness of all lines, mm
+    rect = element_rect(size = 0.5), # Thickness of all rectangles, mm
+    text = element_text(size = 8), # Size of all text, points
+    axis.text.x = element_text(size = 8,color = 'black'), # Angle x-axis text
+    axis.text.y = element_text(size = 8,color = 'black'), # Angle x-axis text
+    axis.title.x = element_text(size = 10), # Size x-axis title
+    axis.title.y = element_text(size = 10), # Size y-axis title
+    panel.grid.minor = element_blank(), # No minor grid lines
+    panel.grid.major.x = element_blank(), # No major x-axis grid lines
+    panel.grid.major.y = element_blank(),
+    legend.title = element_blank(),
+    legend.position = 'none',
+    legend.box.background = element_rect(size = 0.2), # Box for legend
+    legend.key.size = unit(4, unit = 'mm'),
+    legend.text = element_text(size = 8),
+  )
+# methylation
+eu_dis = vegdist(TOBMI_train[,1207:1506],method="euclidean")
+adonis2(eu_dis ~ asthmawhz, data = Label_train, permutations = 999)
+
+tsne_out <- Rtsne(TOBMI_train[,1207:1506],pca=FALSE,perplexity=2,theta=0.0,check_duplicates = FALSE)
+tsne_out <- as.data.frame(tsne_out$Y)
+pc_plot_data<-data.frame(PC1=tsne_out$V1, PC2=tsne_out$V2, status=Label_train$asthmawhz)
+                         
+g12 = ggplot(data=pc_plot_data,aes(PC1,PC2,color=status))+geom_point(size=1,alpha=0.7)+stat_ellipse()+
+  scale_color_manual(values=c("#FFC20A","#0C7BDC"))+xlab('tSNE_1')+ylab('tSNE_2')+
+  theme_bw() +
+  theme(
+    line = element_line(size = 0.5), # Thickness of all lines, mm
+    rect = element_rect(size = 0.5), # Thickness of all rectangles, mm
+    text = element_text(size = 8), # Size of all text, points
+    axis.text.x = element_text(size = 8,color = 'black'), # Angle x-axis text
+    axis.text.y = element_text(size = 8,color = 'black'), # Angle x-axis text
+    axis.title.x = element_text(size = 10), # Size x-axis title
+    axis.title.y = element_text(size = 10), # Size y-axis title
+    panel.grid.minor = element_blank(), # No minor grid lines
+    panel.grid.major.x = element_blank(), # No major x-axis grid lines
+    panel.grid.major.y = element_blank(),
+    legend.title = element_blank(),
+    legend.position = 'none',
+    legend.box.background = element_rect(size = 0.2), # Box for legend
+    legend.key.size = unit(4, unit = 'mm'),
+    legend.text = element_text(size = 8),
+  )
+```
+
+```{r}
+# GWAS
+eu_dis = vegdist(MissRF_train[,1:6],method="euclidean")
+adonis2(eu_dis ~ asthmawhz, data = Label_train, permutations = 999)
+
+tsne_out <- Rtsne(MissRF_train[,1:6],pca=FALSE,perplexity=2,theta=0.0,check_duplicates = FALSE)
+tsne_out <- as.data.frame(tsne_out$Y)
+pc_plot_data<-data.frame(PC1=tsne_out$V1, PC2=tsne_out$V2, status=Label_train$asthmawhz)
+                         
+g13 = ggplot(data=pc_plot_data,aes(PC1,PC2,color=status))+geom_point(size=1,alpha=0.7)+stat_ellipse()+
+  scale_color_manual(values=c("#FFC20A","#0C7BDC"))+xlab('tSNE_1')+ylab('tSNE_2')+
+  theme_bw() +
+  theme(
+    line = element_line(size = 0.5), # Thickness of all lines, mm
+    rect = element_rect(size = 0.5), # Thickness of all rectangles, mm
+    text = element_text(size = 8), # Size of all text, points
+    axis.text.x = element_text(size = 8,color = 'black'), # Angle x-axis text
+    axis.text.y = element_text(size = 8,color = 'black'), # Angle x-axis text
+    axis.title.x = element_text(size = 10), # Size x-axis title
+    axis.title.y = element_text(size = 10), # Size y-axis title
+    panel.grid.minor = element_blank(), # No minor grid lines
+    panel.grid.major.x = element_blank(), # No major x-axis grid lines
+    panel.grid.major.y = element_blank(),
+    legend.title = element_blank(),
+    legend.position = 'none',
+    legend.box.background = element_rect(size = 0.2), # Box for legend
+    legend.key.size = unit(4, unit = 'mm'),
+    legend.text = element_text(size = 8),
+  )
+# miRNA
+eu_dis = vegdist(MissRF_train[,7:306],method="euclidean")
+adonis2(eu_dis ~ asthmawhz, data = Label_train, permutations = 999)
+
+tsne_out <- Rtsne(MissRF_train[,7:306],pca=FALSE,perplexity=2,theta=0.0,check_duplicates = FALSE)
+tsne_out <- as.data.frame(tsne_out$Y)
+pc_plot_data<-data.frame(PC1=tsne_out$V1, PC2=tsne_out$V2, status=Label_train$asthmawhz)
+                         
+g14 = ggplot(data=pc_plot_data,aes(PC1,PC2,color=status))+geom_point(size=1,alpha=0.7)+stat_ellipse()+
+  scale_color_manual(values=c("#FFC20A","#0C7BDC"))+xlab('tSNE_1')+ylab('tSNE_2')+
+  theme_bw() +
+  theme(
+    line = element_line(size = 0.5), # Thickness of all lines, mm
+    rect = element_rect(size = 0.5), # Thickness of all rectangles, mm
+    text = element_text(size = 8), # Size of all text, points
+    axis.text.x = element_text(size = 8,color = 'black'), # Angle x-axis text
+    axis.text.y = element_text(size = 8,color = 'black'), # Angle x-axis text
+    axis.title.x = element_text(size = 10), # Size x-axis title
+    axis.title.y = element_text(size = 10), # Size y-axis title
+    panel.grid.minor = element_blank(), # No minor grid lines
+    panel.grid.major.x = element_blank(), # No major x-axis grid lines
+    panel.grid.major.y = element_blank(),
+    legend.title = element_blank(),
+    legend.position = 'none',
+    legend.box.background = element_rect(size = 0.2), # Box for legend
+    legend.key.size = unit(4, unit = 'mm'),
+    legend.text = element_text(size = 8),
+  )
+# mRNA
+eu_dis = vegdist(MissRF_train[,307:606],method="euclidean")
+adonis2(eu_dis ~ asthmawhz, data = Label_train, permutations = 999)
+
+tsne_out <- Rtsne(MissRF_train[,307:606],pca=FALSE,perplexity=2,theta=0.0,check_duplicates = FALSE)
+tsne_out <- as.data.frame(tsne_out$Y)
+pc_plot_data<-data.frame(PC1=tsne_out$V1, PC2=tsne_out$V2, status=Label_train$asthmawhz)
+                         
+g15 = ggplot(data=pc_plot_data,aes(PC1,PC2,color=status))+geom_point(size=1,alpha=0.7)+stat_ellipse()+
+  scale_color_manual(values=c("#FFC20A","#0C7BDC"))+xlab('tSNE_1')+ylab('tSNE_2')+
+  theme_bw() +
+  theme(
+    line = element_line(size = 0.5), # Thickness of all lines, mm
+    rect = element_rect(size = 0.5), # Thickness of all rectangles, mm
+    text = element_text(size = 8), # Size of all text, points
+    axis.text.x = element_text(size = 8,color = 'black'), # Angle x-axis text
+    axis.text.y = element_text(size = 8,color = 'black'), # Angle x-axis text
+    axis.title.x = element_text(size = 10), # Size x-axis title
+    axis.title.y = element_text(size = 10), # Size y-axis title
+    panel.grid.minor = element_blank(), # No minor grid lines
+    panel.grid.major.x = element_blank(), # No major x-axis grid lines
+    panel.grid.major.y = element_blank(),
+    legend.title = element_blank(),
+    legend.position = 'none',
+    legend.box.background = element_rect(size = 0.2), # Box for legend
+    legend.key.size = unit(4, unit = 'mm'),
+    legend.text = element_text(size = 8),
+  )
+# microbiome
+eu_dis = vegdist(MissRF_train[,607:906],method="euclidean")
+adonis2(eu_dis ~ asthmawhz, data = Label_train, permutations = 999)
+
+tsne_out <- Rtsne(MissRF_train[,607:906],pca=FALSE,perplexity=2,theta=0.0,check_duplicates = FALSE)
+tsne_out <- as.data.frame(tsne_out$Y)
+pc_plot_data<-data.frame(PC1=tsne_out$V1, PC2=tsne_out$V2, status=Label_train$asthmawhz)
+                         
+g16 = ggplot(data=pc_plot_data,aes(PC1,PC2,color=status))+geom_point(size=1,alpha=0.7)+stat_ellipse()+
+  scale_color_manual(values=c("#FFC20A","#0C7BDC"))+xlab('tSNE_1')+ylab('tSNE_2')+
+  theme_bw() +
+  theme(
+    line = element_line(size = 0.5), # Thickness of all lines, mm
+    rect = element_rect(size = 0.5), # Thickness of all rectangles, mm
+    text = element_text(size = 8), # Size of all text, points
+    axis.text.x = element_text(size = 8,color = 'black'), # Angle x-axis text
+    axis.text.y = element_text(size = 8,color = 'black'), # Angle x-axis text
+    axis.title.x = element_text(size = 10), # Size x-axis title
+    axis.title.y = element_text(size = 10), # Size y-axis title
+    panel.grid.minor = element_blank(), # No minor grid lines
+    panel.grid.major.x = element_blank(), # No major x-axis grid lines
+    panel.grid.major.y = element_blank(),
+    legend.title = element_blank(),
+    legend.position = 'none',
+    legend.box.background = element_rect(size = 0.2), # Box for legend
+    legend.key.size = unit(4, unit = 'mm'),
+    legend.text = element_text(size = 8),
+  )
+# metabomics
+eu_dis = vegdist(MissRF_train[,907:1206],method="euclidean")
+adonis2(eu_dis ~ asthmawhz, data = Label_train, permutations = 999)
+
+tsne_out <- Rtsne(MissRF_train[,907:1206],pca=FALSE,perplexity=2,theta=0.0,check_duplicates = FALSE)
+tsne_out <- as.data.frame(tsne_out$Y)
+pc_plot_data<-data.frame(PC1=tsne_out$V1, PC2=tsne_out$V2, status=Label_train$asthmawhz)
+                         
+g17 = ggplot(data=pc_plot_data,aes(PC1,PC2,color=status))+geom_point(size=1,alpha=0.7)+stat_ellipse()+
+  scale_color_manual(values=c("#FFC20A","#0C7BDC"))+xlab('tSNE_1')+ylab('tSNE_2')+
+  theme_bw() +
+  theme(
+    line = element_line(size = 0.5), # Thickness of all lines, mm
+    rect = element_rect(size = 0.5), # Thickness of all rectangles, mm
+    text = element_text(size = 8), # Size of all text, points
+    axis.text.x = element_text(size = 8,color = 'black'), # Angle x-axis text
+    axis.text.y = element_text(size = 8,color = 'black'), # Angle x-axis text
+    axis.title.x = element_text(size = 10), # Size x-axis title
+    axis.title.y = element_text(size = 10), # Size y-axis title
+    panel.grid.minor = element_blank(), # No minor grid lines
+    panel.grid.major.x = element_blank(), # No major x-axis grid lines
+    panel.grid.major.y = element_blank(),
+    legend.title = element_blank(),
+    legend.position = 'none',
+    legend.box.background = element_rect(size = 0.2), # Box for legend
+    legend.key.size = unit(4, unit = 'mm'),
+    legend.text = element_text(size = 8),
+  )
+# methylation
+eu_dis = vegdist(MissRF_train[,1207:1506],method="euclidean")
+adonis2(eu_dis ~ asthmawhz, data = Label_train, permutations = 999)
+
+tsne_out <- Rtsne(MissRF_train[,1207:1506],pca=FALSE,perplexity=2,theta=0.0,check_duplicates = FALSE)
+tsne_out <- as.data.frame(tsne_out$Y)
+pc_plot_data<-data.frame(PC1=tsne_out$V1, PC2=tsne_out$V2, status=Label_train$asthmawhz)
+                         
+g18 = ggplot(data=pc_plot_data,aes(PC1,PC2,color=status))+geom_point(size=1,alpha=0.7)+stat_ellipse()+
+  scale_color_manual(values=c("#FFC20A","#0C7BDC"))+xlab('tSNE_1')+ylab('tSNE_2')+
+  theme_bw() +
+  theme(
+    line = element_line(size = 0.5), # Thickness of all lines, mm
+    rect = element_rect(size = 0.5), # Thickness of all rectangles, mm
+    text = element_text(size = 8), # Size of all text, points
+    axis.text.x = element_text(size = 8,color = 'black'), # Angle x-axis text
+    axis.text.y = element_text(size = 8,color = 'black'), # Angle x-axis text
+    axis.title.x = element_text(size = 10), # Size x-axis title
+    axis.title.y = element_text(size = 10), # Size y-axis title
+    panel.grid.minor = element_blank(), # No minor grid lines
+    panel.grid.major.x = element_blank(), # No major x-axis grid lines
+    panel.grid.major.y = element_blank(),
+    legend.title = element_blank(),
+    legend.position = 'none',
+    legend.box.background = element_rect(size = 0.2), # Box for legend
+    legend.key.size = unit(4, unit = 'mm'),
+    legend.text = element_text(size = 8),
+  )
+```
+```{r}
+p1 = do.call(ggarrange, c(list(g1,g2,g3,g4,g5,g6,g7,g8,g9,g10,g11,g12,g13,g14,g15,g16,g17,g18), 
+                          list(labels = c("a1","b1","c1","d1","e1","f1","a2","b2","c2","d2","e2","f2","a3","b3","c3","d3","e3","f3"),ncol = 6, nrow = 3)))
+ggsave(p1,file="../figures/Fig3.pdf",width=14, height=7)
+```
+
+
+
+
+

@@ -1,0 +1,124 @@
+---
+title: "Asthma outcome prediction for multi-omics challenge"
+author: "Xu-Wen Wang"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# This code is used to select the most correlated omics for the classification.
+
+```{r packages}
+library(snpStats)
+library(phyloseq)
+require(hexbin)
+library(dplyr) 
+library(tidyverse)
+library(ggplot2)
+library(reshape2)
+```
+
+```{r}
+setwd('/udd/spxuw/Asthma_outcome_prediction/code')
+
+## load the mapping files
+
+mapping_1 = read.table('../metadata/VDAART_multiomics_id_map.csv', header = TRUE, sep = ',')
+mapping_2 = read.table('../metadata/VDAART_multiomics_mirna-mrna_map.csv', header = TRUE, sep = ',')
+mapping_3 =  read.table('../microbiome/metadata.csv', header = TRUE, sep = ',')
+disease_state = read.table('../metadata/asthma-wheezeyr3.csv', header = TRUE, sep = ',')
+
+## load omics data
+
+# load gwas data
+gwas = read.plink("../gwas/merged.QC.bed", "../gwas/merged.QC.bim", "../gwas/merged.QC.fam", na.strings = c("0", "-9"), sep = "." , select.subjects = NULL, select.snps = NULL) 
+PG_VID = read.csv('../gwas/merged.QC.fam', sep = ' ', header = FALSE)
+rownames(gwas$genotypes) = PG_VID$V2[match(rownames(gwas$genotypes), PG_VID$V1)]
+unmapped = which(is.na(mapping_1$vid[match(rownames(gwas$genotypes), mapping_1$S_SUBJECTID)])=="TRUE")
+gwas$genotypes = gwas$genotypes[-unmapped,]
+rownames(gwas$genotypes) = mapping_1$vid[match(rownames(gwas$genotypes), mapping_1$S_SUBJECTID)]
+print(paste("sample size of gwas is: ",nrow(gwas$genotypes)))
+
+# load mirna
+mirna = read.table('../mirna/merged_counts_mirna_cb.txt',header = TRUE,row.names = 1, check.names = FALSE)
+colnames(mirna) = mapping_2$vid[match(colnames(mirna), mapping_2$ID)]
+print(paste("sample size of mirna is: ",ncol(mirna)))
+
+# load mrna
+mrna = read.table('../mrna/merged_counts.txt',header = TRUE,row.names = 1,  check.names = FALSE)
+colnames(mrna) = mapping_2$vid[match(colnames(mrna), mapping_2$ID)]
+print(paste("sample size of mirna is: ",ncol(mrna)))
+
+# microbiome
+microbiome = readRDS("../microbiome/Phyloseq")
+microbiome_table = microbiome@otu_table@.Data
+before_1 = mapping_3$SampleID[mapping_3$COLLECTION=='Fecal Flora Collection month 3']
+before_2 = mapping_3$SampleID[mapping_3$COLLECTION=='Year 1 FF Collection']
+microbiome_table = microbiome_table[,colnames(microbiome_table)%in%c(before_1,before_2)]
+colnames(microbiome_table) = mapping_3$vid[match(colnames(microbiome_table), mapping_3$SampleID)]
+print(paste("sample size of microbiome is: ",ncol(microbiome_table)))
+
+# metabolomics
+metabolomics = read.table('../metabolomics/Mets_Final_Plasma_Y1_Apr2019.csv', sep = ',', check.names = FALSE )
+rownames(metabolomics) = metabolomics[,4]
+colnames(metabolomics) = metabolomics[1,]
+metabolomics = metabolomics[2:nrow(metabolomics),27:ncol(metabolomics)]
+rownames(metabolomics) = mapping_1$vid[match(rownames(metabolomics), mapping_1$S_SUBJECTID)]
+rowname_temp = rownames(metabolomics)
+metabolomics <- as.data.frame(lapply(metabolomics, as.numeric))
+rownames(metabolomics) = rowname_temp
+print(paste("sample size of metabolomics is: ",nrow(metabolomics)))
+
+# methylation
+load('../methylation/disease_outcome_prediction_challenge/betas.rcp.vdaart.pc2.1622163789.RData')
+meta_methylation = read.table('../methylation/disease_outcome_prediction_challenge/SampleSheet.csv',header = TRUE, sep = ',')
+meta_methylation$Basename = sub("/proj/regeps/regep00/studies/VDAART/data/methylation/VDAART_850K/data/raw/LEVEL1/", "", meta_methylation$Basename)
+colnames(betas.rcp.vdaart.pc2) = meta_methylation$S_SUBJECTID[match(colnames(betas.rcp.vdaart.pc2), meta_methylation$Basename)]
+colnames(betas.rcp.vdaart.pc2) = mapping_1$vid[match(colnames(betas.rcp.vdaart.pc2), mapping_1$S_SUBJECTID)]
+print(paste("sample size of methylation is: ",ncol(betas.rcp.vdaart.pc2)))
+```
+# data intersection
+```{r}
+library(ComplexHeatmap)
+listInput = list(gwas=rownames(gwas$genotypes), mirna=colnames(mirna), mrna=colnames(mrna), microbiome=colnames(microbiome_table),
+                 metabolomics=rownames(metabolomics),methylation=colnames(betas.rcp.vdaart.pc2))
+# the same for using m2 or m3
+m_mode = make_comb_mat(listInput, mode = "intersect")
+pdf(file = 'intersection.pdf',width = 10,height = 8)
+UpSet(m_mode,comb_col = c("#009988"), bg_col = c("#EE7733"), bg_pt_col = "#CCCCFF", right_annotation = upset_right_annotation(m_mode,gp = gpar(fill = "#CCBB44"),color = '#CCBB44'), height = unit(4, "cm"))
+dev.off()
+```
+# samples with all six omics available
+```{r}
+overall = intersect(intersect(intersect(intersect(intersect(rownames(gwas$genotypes),colnames(mirna)),colnames(microbiome_table)),rownames(metabolomics)),colnames(betas.rcp.vdaart.pc2)),colnames(mrna))
+print(paste("sample size with all omics available: ",length(overall)))
+```
+# export omics data for downstream analysis
+```{r}
+Final = intersect(overall,disease_state$vid)
+rownames(disease_state) = disease_state$vid
+disease_state = disease_state[disease_state$vid%in%Final,]
+rownames(disease_state) = as.character(rownames(disease_state))
+
+# statistics
+print(paste("Control size is: ",length(which(disease_state$asthmawhz=='FALSE'))))
+print(paste("Case size is: ",length(which(disease_state$asthmawhz=='TRUE'))))
+```
+
+# check the missingness
+```{r}
+Overlap3 = intersect(listInput[[1]],intersect(listInput[[4]],listInput[[6]]))
+missing_miRNA = Overlap3[!Overlap3%in%listInput[[2]]]
+missing_mRNA = Overlap3[!Overlap3%in%listInput[[3]]]
+missing_metabomics = Overlap3[!Overlap3%in%listInput[[5]]]
+missing_combine = c(missing_miRNA,missing_mRNA,missing_metabomics)
+table_missing = table(missing_combine)
+```
+
+
+
